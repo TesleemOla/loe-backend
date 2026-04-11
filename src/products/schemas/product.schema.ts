@@ -17,14 +17,11 @@ export class Product {
   @Prop({ required: true, type: Number })
   price: number;
 
-  @Prop({ required: true, type: Number, default: 0 })
-  stock: number;
-
   @Prop({ default: true })
   isActive: boolean;
 }
 
 export const ProductSchema = SchemaFactory.createForClass(Product);
 
-// Compound index: same SKU can't appear twice within a unit
-ProductSchema.index({ unitId: 1, sku: 1 }, { unique: true });
+// System-wide unique SKU: A product code cannot be reused at another branch
+ProductSchema.index({ sku: 1 }, { unique: true });

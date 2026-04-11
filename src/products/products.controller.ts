@@ -16,15 +16,23 @@ export class ProductsController {
   // Super Admin: view all products across all units
   @Get('all')
   @Roles(Role.SUPER_ADMIN)
-  findAll() {
-    return this.productsService.findAll();
+  findAll(@Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.productsService.findAll(
+      page ? parseInt(page) : 1, 
+      limit ? parseInt(limit) : 50
+    );
   }
 
   // Unit Manager: view their unit's products
   @Get()
   @Roles(Role.UNIT_MANAGER)
-  findMine(@Request() req: any) {
-    return this.productsService.findAllByUnit(req.user.unitId);
+  findMine(@Request() req: any, @Query('page') page?: string, @Query('limit') limit?: string, @Query('search') search?: string) {
+    return this.productsService.findAllByUnit(
+      req.user.unitId, 
+      page ? parseInt(page) : 1, 
+      limit ? parseInt(limit) : 50,
+      search || ''
+    );
   }
 
   @Post()
@@ -52,9 +60,18 @@ export class ProductsController {
 
   @Delete(':id')
   @Roles(Role.SUPER_ADMIN, Role.UNIT_MANAGER)
-  remove(@Param('id') id: string, @Request() req: any, @Query('unitId') unitId?: string) {
+  async remove(@Param('id') id: string, @Request() req: any, @Query('unitId') unitId?: string) {
     const targetUnitId = req.user.role === Role.SUPER_ADMIN ? unitId : req.user.unitId;
     if (!targetUnitId) throw new ForbiddenException('unitId is required for this operation');
-    return this.productsService.remove(id, targetUnitId);
+    await this.productsService.remove(id, targetUnitId);
+    return { success: true, message: 'Product deactivated' };
+  }
+
+  @Patch('inventory/bulk')
+  @Roles(Role.SUPER_ADMIN, Role.UNIT_MANAGER)
+  bulkUpdateStock(@Request() req: any, @Body() body: { updates: { productId: string; stock: number }[] }) {
+    const unitId = req.user.unitId;
+    if (!unitId) throw new ForbiddenException('unitId is required for this operation');
+    return this.productsService.bulkUpdateInventory(unitId, body.updates);
   }
 }

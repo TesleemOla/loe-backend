@@ -50,6 +50,14 @@ export class TransactionsService {
     });
 
     const savedTx = await tx.save();
+
+    // Update Unit-Specific Inventory
+    await Promise.all(
+      resolvedItems.map((item) =>
+        this.productsService.updateStock(unitId, item.productId.toString(), -item.qty),
+      ),
+    );
+
     this.eventsGateway.broadcastNewTransaction(unitId, savedTx);
     this.eventsGateway.broadcastAnalyticsUpdate(unitId);
     return savedTx;
@@ -84,6 +92,14 @@ export class TransactionsService {
     });
 
     const savedTx = await voidTx.save();
+
+    // Restore Unit-Specific Inventory
+    await Promise.all(
+      original.items.map((item) =>
+        this.productsService.updateStock(unitId, item.productId.toString(), item.qty),
+      ),
+    );
+
     this.eventsGateway.broadcastNewTransaction(unitId, savedTx);
     this.eventsGateway.broadcastAnalyticsUpdate(unitId);
     return savedTx;
@@ -126,22 +142,31 @@ export class TransactionsService {
     });
 
     const savedTx = await refundTx.save();
+
+    // Restore Unit-Specific Inventory for refunded quantities
+    await Promise.all(
+      resolvedItems.map((item) =>
+        this.productsService.updateStock(unitId, item.productId.toString(), item.qty),
+      ),
+    );
+
     this.eventsGateway.broadcastNewTransaction(unitId, savedTx);
     this.eventsGateway.broadcastAnalyticsUpdate(unitId);
     return savedTx;
   }
 
   // ─── QUERIES ─────────────────────────────────────────────────────────────────
-  async findByUnit(unitId: string): Promise<TransactionDocument[]> {
+  async findByUnit(unitId: string, page = 1, limit = 50): Promise<TransactionDocument[]> {
     return this.txModel
       .find({ unitId: new Types.ObjectId(unitId) })
       .sort({ timestamp: -1 })
-      .limit(100)
+      .skip((page - 1) * limit)
+      .limit(limit)
       .populate('processedBy', 'email')
       .exec();
   }
 
-  async findAll(unitId?: string): Promise<TransactionDocument[]> {
+  async findAll(unitId?: string, page = 1, limit = 50): Promise<TransactionDocument[]> {
     const filter: any = {};
     if (unitId) {
       filter.unitId = new Types.ObjectId(unitId);
@@ -150,7 +175,8 @@ export class TransactionsService {
     return this.txModel
       .find(filter)
       .sort({ timestamp: -1 })
-      .limit(200)
+      .skip((page - 1) * limit)
+      .limit(limit)
       .populate('unitId', 'name location')
       .populate('processedBy', 'email')
       .exec();

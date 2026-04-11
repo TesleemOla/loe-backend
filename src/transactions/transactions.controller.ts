@@ -23,8 +23,12 @@ export class TransactionsController {
   // ── Super Admin ────────────────────────────────────────────────────────────
   @Get('all')
   @Roles(Role.SUPER_ADMIN)
-  findAll(@Query('unitId') unitId?: string) {
-    return this.transactionsService.findAll(unitId);
+  findAll(@Query('unitId') unitId?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.transactionsService.findAll(
+      unitId,
+      page ? parseInt(page) : 1, 
+      limit ? parseInt(limit) : 50
+    );
   }
 
   @Get('summary/global')
@@ -42,8 +46,12 @@ export class TransactionsController {
   // ── Unit Manager ───────────────────────────────────────────────────────────
   @Get()
   @Roles(Role.UNIT_MANAGER)
-  findMine(@Request() req: any) {
-    return this.transactionsService.findByUnit(req.user.unitId);
+  findMine(@Request() req: any, @Query('page') page?: string, @Query('limit') limit?: string) {
+    return this.transactionsService.findByUnit(
+      req.user.unitId,
+      page ? parseInt(page) : 1, 
+      limit ? parseInt(limit) : 50
+    );
   }
 
   @Get('summary/local')

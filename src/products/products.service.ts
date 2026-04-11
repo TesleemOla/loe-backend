@@ -2,60 +2,214 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Product, ProductDocument } from './schemas/product.schema';
+import { Inventory, InventoryDocument } from './schemas/inventory.schema';
+import { UnitsService } from '../units/units.service';
 
 @Injectable()
 export class ProductsService {
   constructor(
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
+    @InjectModel(Inventory.name) private inventoryModel: Model<InventoryDocument>,
+    private readonly unitsService: UnitsService,
   ) {}
 
   async create(unitId: string, dto: any): Promise<ProductDocument> {
-    const product = new this.productModel({ ...dto, unitId: new Types.ObjectId(unitId) });
-    return product.save();
+    const { stock, ...productData } = dto;
+    
+    let targetUnitId: Types.ObjectId;
+    let initializeAll = false;
+
+    if (unitId === 'all') {
+      const allUnits = await this.unitsService.findAll();
+      if (allUnits.length === 0) throw new NotFoundException('No units found to initialize inventory');
+      targetUnitId = allUnits[0]._id as Types.ObjectId;
+      initializeAll = true;
+    } else {
+      targetUnitId = new Types.ObjectId(unitId);
+    }
+
+    // 1. Create the Global Product Metadata
+    const product = new this.productModel({ 
+      ...productData, 
+      unitId: targetUnitId
+    });
+    const savedProduct = await product.save();
+
+    // 2. Initialize Inventory
+    if (initializeAll) {
+      const allUnits = await this.unitsService.findAll();
+      const inventoryOps = allUnits.map(unit => ({
+        productId: savedProduct._id as Types.ObjectId,
+        unitId: unit._id as Types.ObjectId,
+        stock: stock || 0,
+      }));
+      await this.inventoryModel.insertMany(inventoryOps);
+    } else {
+      const inventory = new this.inventoryModel({
+        productId: savedProduct._id as Types.ObjectId,
+        unitId: targetUnitId,
+        stock: stock || 0,
+      });
+      await inventory.save();
+    }
+
+    return savedProduct;
   }
 
-  async findAllByUnit(unitId: string): Promise<ProductDocument[]> {
-    return this.productModel.find({ unitId: new Types.ObjectId(unitId), isActive: true }).exec();
+  // Returns all products with stock for a specific unit (Shared Catalog view)
+  async findAllByUnit(unitId: string, page = 1, limit = 50, search = ''): Promise<any[]> {
+    const skip = (page - 1) * limit;
+    const match: any = { isActive: true };
+    
+    if (search) {
+      match.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { sku: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    return this.productModel.aggregate([
+      { $match: match },
+      { $sort: { createdAt: -1 } },
+      { $skip: skip },
+      { $limit: limit },
+      {
+        $lookup: {
+          from: 'inventories', 
+          let: { prodId: '$_id' },
+          pipeline: [
+            { 
+              $match: { 
+                $expr: { 
+                  $and: [
+                    { $eq: ['$productId', '$$prodId'] },
+                    { $eq: ['$unitId', new Types.ObjectId(unitId)] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'inventory'
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          sku: 1,
+          price: 1,
+          isActive: 1,
+          unitId: 1,
+          stock: { $ifNull: [{ $arrayElemAt: ['$inventory.stock', 0] }, 0] }
+        }
+      }
+    ]).exec();
   }
 
-  async findAll(): Promise<ProductDocument[]> {
-    return this.productModel.find({ isActive: true }).populate('unitId', 'name location').exec();
+  // Admin view: All products
+  async findAll(page = 1, limit = 50): Promise<ProductDocument[]> {
+    return this.productModel
+      .find({ isActive: true })
+      .sort({ createdAt: -1 })
+      .skip((page - 1) * limit)
+      .limit(limit)
+      .populate('unitId', 'name location')
+      .exec();
   }
 
-  async findOne(id: string, unitId: string): Promise<ProductDocument> {
-    const product = await this.productModel.findOne({
-      _id: new Types.ObjectId(id),
-      unitId: new Types.ObjectId(unitId),
-    }).exec();
-    if (!product) throw new NotFoundException('Product not found');
-    return product;
+  async findOne(id: string, unitId: string): Promise<any> {
+    const products = await this.productModel.aggregate([
+      { $match: { _id: new Types.ObjectId(id), isActive: true } },
+      {
+        $lookup: {
+          from: 'inventories',
+          let: { prodId: '$_id' },
+          pipeline: [
+            { 
+              $match: { 
+                $expr: { 
+                  $and: [
+                    { $eq: ['$productId', '$$prodId'] },
+                    { $eq: ['$unitId', new Types.ObjectId(unitId)] }
+                  ]
+                }
+              }
+            }
+          ],
+          as: 'inventory'
+        }
+      },
+      {
+        $project: {
+          name: 1,
+          sku: 1,
+          price: 1,
+          isActive: 1,
+          unitId: 1,
+          stock: { $ifNull: [{ $arrayElemAt: ['$inventory.stock', 0] }, 0] }
+        }
+      }
+    ]).exec();
+
+    if (products.length === 0) throw new NotFoundException('Product not found');
+    return products[0];
+  }
+
+  async updateStock(unitId: string, productId: string, delta: number): Promise<void> {
+    await this.inventoryModel.findOneAndUpdate(
+      { 
+        productId: new Types.ObjectId(productId), 
+        unitId: new Types.ObjectId(unitId) 
+      },
+      { $inc: { stock: delta } },
+      { upsert: true, new: true } // If no inventory record exists yet for this branch, create one
+    ).exec();
   }
 
   async update(id: string, unitId: string | null, dto: any): Promise<ProductDocument> {
+    const { stock, ...productData } = dto;
     const filter: any = { _id: new Types.ObjectId(id) };
-    if (unitId) {
-      filter.unitId = new Types.ObjectId(unitId);
-    }
-
+    
+    // Updates the global product metadata
     const product = await this.productModel.findOneAndUpdate(
       filter,
-      dto,
+      productData,
       { new: true },
     ).exec();
+
     if (!product) throw new NotFoundException('Product not found');
+
+    // If stock was provided in the edit, update it specifically for that unit
+    if (stock !== undefined && unitId) {
+      await this.updateStock(unitId, id, 0); // Ensure record exists
+      await this.inventoryModel.findOneAndUpdate(
+        { productId: product._id, unitId: new Types.ObjectId(unitId) },
+        { stock: parseInt(stock) }
+      ).exec();
+    }
+
     return product;
+  }
+
+  async bulkUpdateInventory(unitId: string, updates: { productId: string; stock: number }[]): Promise<void> {
+    const ops = updates.map((update) => ({
+      updateOne: {
+        filter: { 
+          productId: new Types.ObjectId(update.productId), 
+          unitId: new Types.ObjectId(unitId) 
+        },
+        update: { stock: update.stock },
+        upsert: true,
+      },
+    }));
+
+    await this.inventoryModel.bulkWrite(ops);
   }
 
   async remove(id: string, unitId: string | null): Promise<void> {
     const filter: any = { _id: new Types.ObjectId(id) };
-    if (unitId) {
-      filter.unitId = new Types.ObjectId(unitId);
-    }
-
-    // Soft delete
     const result = await this.productModel.findOneAndUpdate(
-      filter,
-      { isActive: false },
+        filter,
+        { isActive: false },
     ).exec();
     if (!result) throw new NotFoundException('Product not found');
   }
