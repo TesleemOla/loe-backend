@@ -31,9 +31,14 @@ export class ProductsService {
     return product;
   }
 
-  async update(id: string, unitId: string, dto: any): Promise<ProductDocument> {
+  async update(id: string, unitId: string | null, dto: any): Promise<ProductDocument> {
+    const filter: any = { _id: new Types.ObjectId(id) };
+    if (unitId) {
+      filter.unitId = new Types.ObjectId(unitId);
+    }
+
     const product = await this.productModel.findOneAndUpdate(
-      { _id: new Types.ObjectId(id), unitId: new Types.ObjectId(unitId) },
+      filter,
       dto,
       { new: true },
     ).exec();
@@ -41,10 +46,15 @@ export class ProductsService {
     return product;
   }
 
-  async remove(id: string, unitId: string): Promise<void> {
+  async remove(id: string, unitId: string | null): Promise<void> {
+    const filter: any = { _id: new Types.ObjectId(id) };
+    if (unitId) {
+      filter.unitId = new Types.ObjectId(unitId);
+    }
+
     // Soft delete
     const result = await this.productModel.findOneAndUpdate(
-      { _id: new Types.ObjectId(id), unitId: new Types.ObjectId(unitId) },
+      filter,
       { isActive: false },
     ).exec();
     if (!result) throw new NotFoundException('Product not found');
