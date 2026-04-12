@@ -4,13 +4,17 @@ import { Model, Types } from 'mongoose';
 import { Product, ProductDocument } from './schemas/product.schema';
 import { Inventory, InventoryDocument } from './schemas/inventory.schema';
 import { UnitsService } from '../units/units.service';
+import { EventsGateway } from '../events/events.gateway';
 
 @Injectable()
 export class ProductsService {
+  private readonly LOW_STOCK_THRESHOLD = 10;
+
   constructor(
     @InjectModel(Product.name) private productModel: Model<ProductDocument>,
     @InjectModel(Inventory.name) private inventoryModel: Model<InventoryDocument>,
     private readonly unitsService: UnitsService,
+    private readonly eventsGateway: EventsGateway,
   ) {}
 
   async create(unitId: string, dto: any): Promise<ProductDocument> {
@@ -155,14 +159,24 @@ export class ProductsService {
   }
 
   async updateStock(unitId: string, productId: string, delta: number): Promise<void> {
-    await this.inventoryModel.findOneAndUpdate(
+    const updated = await this.inventoryModel.findOneAndUpdate(
       { 
         productId: new Types.ObjectId(productId), 
         unitId: new Types.ObjectId(unitId) 
       },
       { $inc: { stock: delta } },
-      { upsert: true, new: true } // If no inventory record exists yet for this branch, create one
+      { upsert: true, new: true } 
     ).exec();
+
+    if (updated.stock <= this.LOW_STOCK_THRESHOLD) {
+      const product = await this.productModel.findById(productId);
+      if (product) {
+        this.eventsGateway.broadcastLowStockAlert(unitId, {
+          ...product.toObject(),
+          stock: updated.stock
+        });
+      }
+    }
   }
 
   async update(id: string, unitId: string | null, dto: any): Promise<ProductDocument> {
@@ -203,6 +217,24 @@ export class ProductsService {
     }));
 
     await this.inventoryModel.bulkWrite(ops);
+
+    // After bulk update, check for low stock on all updated products
+    // This is a bit heavy, but ensures consistency for notifications
+    for (const update of updates) {
+      const current = await this.inventoryModel.findOne({
+        productId: new Types.ObjectId(update.productId),
+        unitId: new Types.ObjectId(unitId)
+      });
+      if (current && current.stock <= this.LOW_STOCK_THRESHOLD) {
+        const product = await this.productModel.findById(update.productId);
+        if (product) {
+          this.eventsGateway.broadcastLowStockAlert(unitId, {
+            ...product.toObject(),
+            stock: current.stock
+          });
+        }
+      }
+    }
   }
 
   async remove(id: string, unitId: string | null): Promise<void> {

@@ -28,6 +28,11 @@ export class TransactionsService {
     const resolvedItems = await Promise.all(
       items.map(async (item) => {
         const product = await this.productsService.findOne(item.productId, unitId);
+        if (product.stock < item.qty) {
+          throw new BadRequestException(
+            `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${item.qty}`,
+          );
+        }
         return {
           productId: new Types.ObjectId(item.productId),
           productName: product.name,
@@ -77,9 +82,13 @@ export class TransactionsService {
 
     if (!original) throw new NotFoundException('Original sale not found');
 
-    // Check no void already exists for this sale
-    const existingVoid = await this.txModel.findOne({ referenceId: original._id, type: TransactionType.VOID }).exec();
-    if (existingVoid) throw new BadRequestException('This sale has already been voided');
+    // Check if any reversal already exists (Void OR Refund)
+    const existingReversal = await this.txModel.findOne({ referenceId: original._id }).exec();
+    if (existingReversal) {
+      throw new BadRequestException(
+        `This transaction has already been ${existingReversal.type.toLowerCase()}ed.`,
+      );
+    }
 
     const voidTx = new this.txModel({
       unitId: original.unitId,
@@ -120,13 +129,26 @@ export class TransactionsService {
 
     if (!original) throw new NotFoundException('Original sale not found');
 
+    // Check if any reversal already exists (Void OR Refund)
+    const existingReversal = await this.txModel.findOne({ referenceId: original._id }).exec();
+    if (existingReversal) {
+      throw new BadRequestException(
+        `This transaction has already been ${existingReversal.type.toLowerCase()}ed.`,
+      );
+    }
+
     const resolvedItems = refundItems.map((ri) => {
       const origItem = original.items.find(
         (oi) => oi.productId.toString() === ri.productId,
       );
       if (!origItem) throw new BadRequestException(`Product ${ri.productId} not in original sale`);
       if (ri.qty > origItem.qty) throw new BadRequestException(`Refund qty exceeds original qty`);
-      return { ...origItem, qty: ri.qty };
+      
+      const itemData = (origItem as any).toObject ? (origItem as any).toObject() : origItem;
+      return { 
+        ...itemData, 
+        qty: ri.qty 
+      };
     });
 
     const total = -(resolvedItems.reduce((s, i) => s + i.priceAtTime * i.qty, 0));
@@ -184,12 +206,13 @@ export class TransactionsService {
 
   async getGlobalSummary() {
     const result = await this.txModel.aggregate([
-      { $match: { type: TransactionType.SALE } },
       {
         $group: {
           _id: null,
           totalRevenue: { $sum: '$total' },
-          totalTransactions: { $sum: 1 },
+          totalTransactions: {
+            $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
+          },
           totalUnits: { $addToSet: '$unitId' },
         },
       },
@@ -212,7 +235,6 @@ export class TransactionsService {
       {
         $match: {
           unitId: new Types.ObjectId(unitId),
-          type: TransactionType.SALE,
           timestamp: { $gte: start },
         },
       },
@@ -220,7 +242,9 @@ export class TransactionsService {
         $group: {
           _id: null,
           todayRevenue: { $sum: '$total' },
-          todayTransactions: { $sum: 1 },
+          todayTransactions: {
+            $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
+          },
         },
       },
     ]);
@@ -229,17 +253,18 @@ export class TransactionsService {
 
   async getUnitsPerformance() {
     return this.txModel.aggregate([
-      { $match: { type: TransactionType.SALE } },
       {
         $group: {
           _id: '$unitId',
           totalRevenue: { $sum: '$total' },
-          transactionCount: { $sum: 1 },
+          transactionCount: {
+            $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
+          },
         },
       },
       {
         $lookup: {
-          from: 'units', // Ensure this matches migration/schema
+          from: 'units',
           localField: '_id',
           foreignField: '_id',
           as: 'unitInfo',
@@ -282,7 +307,6 @@ export class TransactionsService {
     }
 
     const matchQuery: any = {
-      type: TransactionType.SALE,
       timestamp: { $gte: startDate },
     };
 
@@ -296,7 +320,9 @@ export class TransactionsService {
         $group: {
           _id: { $dateToString: { format: groupFormat, date: '$timestamp' } },
           revenue: { $sum: '$total' },
-          count: { $sum: 1 },
+          count: {
+            $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
+          },
         },
       },
       { $sort: { _id: 1 } },
