@@ -64,13 +64,14 @@ export class TransactionsController {
   @Roles(Role.UNIT_MANAGER)
   createSale(
     @Request() req: any,
-    @Body() body: { items: { productId: string; qty: number; overridePrice?: number }[]; customerName?: string },
+    @Body() body: { items: { productId: string; qty: number; overridePrice?: number }[]; customerName?: string; amountPaid?: number },
   ) {
     return this.transactionsService.createSale(
       req.user.unitId,
       req.user.userId,
       body.items,
       body.customerName,
+      body.amountPaid,
     );
   }
 

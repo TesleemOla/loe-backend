@@ -19,6 +19,7 @@ export class TransactionsService {
     userId: string,
     items: { productId: string; qty: number; overridePrice?: number }[],
     customerName?: string,
+    amountPaid?: number,
   ): Promise<TransactionDocument> {
     if (!items || items.length === 0) {
       throw new BadRequestException('A sale must have at least one item');
@@ -49,6 +50,7 @@ export class TransactionsService {
       type: TransactionType.SALE,
       items: resolvedItems,
       total,
+      amountPaid: amountPaid !== undefined ? amountPaid : total,
       processedBy: new Types.ObjectId(userId),
       customerName: customerName || 'Guest',
       timestamp: new Date(),

@@ -50,6 +50,9 @@ export class Transaction {
   @Prop({ type: String, default: 'Guest' })
   customerName: string;
 
+  @Prop({ required: true, type: Number, default: 0 })
+  amountPaid: number;
+
   @Prop({ default: Date.now })
   timestamp: Date;
 }
