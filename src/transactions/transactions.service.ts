@@ -62,6 +62,10 @@ export class TransactionsService {
     });
 
     const savedTx = await tx.save();
+    await savedTx.populate([
+      { path: 'unitId', select: 'name location' },
+      { path: 'processedBy', select: 'email' }
+    ]);
 
     // Update Unit-Specific Inventory
     await Promise.all(
@@ -108,6 +112,10 @@ export class TransactionsService {
     });
 
     const savedTx = await voidTx.save();
+    await savedTx.populate([
+      { path: 'unitId', select: 'name location' },
+      { path: 'processedBy', select: 'email' }
+    ]);
 
     // Restore Unit-Specific Inventory
     await Promise.all(
@@ -171,6 +179,10 @@ export class TransactionsService {
     });
 
     const savedTx = await refundTx.save();
+    await savedTx.populate([
+      { path: 'unitId', select: 'name location' },
+      { path: 'processedBy', select: 'email' }
+    ]);
 
     // Restore Unit-Specific Inventory for refunded quantities
     await Promise.all(
@@ -214,6 +226,7 @@ export class TransactionsService {
       .sort({ timestamp: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
+      .populate('unitId', 'name location')
       .populate('processedBy', 'email')
       .exec();
   }
@@ -275,6 +288,10 @@ export class TransactionsService {
     });
     
     const savedTx = await tx.save();
+    await savedTx.populate([
+      { path: 'unitId', select: 'name location' },
+      { path: 'processedBy', select: 'email' }
+    ]);
     
     this.eventsGateway.broadcastAnalyticsUpdate(tx.unitId.toString());
     return savedTx;
