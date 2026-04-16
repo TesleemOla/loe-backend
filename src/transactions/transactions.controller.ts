@@ -23,11 +23,17 @@ export class TransactionsController {
   // ── Super Admin ────────────────────────────────────────────────────────────
   @Get('all')
   @Roles(Role.SUPER_ADMIN)
-  findAll(@Query('unitId') unitId?: string, @Query('page') page?: string, @Query('limit') limit?: string) {
+  findAll(
+    @Query('unitId') unitId?: string, 
+    @Query('page') page?: string, 
+    @Query('limit') limit?: string,
+    @Query('paymentStatus') paymentStatus?: string
+  ) {
     return this.transactionsService.findAll(
       unitId,
       page ? parseInt(page) : 1, 
-      limit ? parseInt(limit) : 50
+      limit ? parseInt(limit) : 50,
+      paymentStatus
     );
   }
 
@@ -46,11 +52,17 @@ export class TransactionsController {
   // ── Unit Manager ───────────────────────────────────────────────────────────
   @Get()
   @Roles(Role.UNIT_MANAGER)
-  findMine(@Request() req: any, @Query('page') page?: string, @Query('limit') limit?: string) {
+  findMine(
+    @Request() req: any, 
+    @Query('page') page?: string, 
+    @Query('limit') limit?: string,
+    @Query('paymentStatus') paymentStatus?: string
+  ) {
     return this.transactionsService.findByUnit(
       req.user.unitId,
       page ? parseInt(page) : 1, 
-      limit ? parseInt(limit) : 50
+      limit ? parseInt(limit) : 50,
+      paymentStatus
     );
   }
 
@@ -89,5 +101,15 @@ export class TransactionsController {
     @Body() body: { items: { productId: string; qty: number }[] },
   ) {
     return this.transactionsService.refundSale(id, req.user.unitId, req.user.userId, body.items);
+  }
+
+  @Post(':id/pay')
+  @Roles(Role.UNIT_MANAGER)
+  recordPayment(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { amount: number },
+  ) {
+    return this.transactionsService.recordPayment(id, body.amount, req.user.userId);
   }
 }

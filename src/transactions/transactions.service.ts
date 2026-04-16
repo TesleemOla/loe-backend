@@ -51,6 +51,11 @@ export class TransactionsService {
       items: resolvedItems,
       total,
       amountPaid: amountPaid !== undefined ? amountPaid : total,
+      paymentLog: amountPaid !== 0 ? [{
+        amount: amountPaid !== undefined ? amountPaid : total,
+        recordedBy: new Types.ObjectId(userId),
+        timestamp: new Date()
+      }] : [],
       processedBy: new Types.ObjectId(userId),
       customerName: customerName || 'Guest',
       timestamp: new Date(),
@@ -180,9 +185,32 @@ export class TransactionsService {
   }
 
   // ─── QUERIES ─────────────────────────────────────────────────────────────────
-  async findByUnit(unitId: string, page = 1, limit = 50): Promise<TransactionDocument[]> {
+  async findByUnit(unitId: string, page = 1, limit = 50, paymentStatus?: string): Promise<TransactionDocument[]> {
+    const filter: any = { unitId: new Types.ObjectId(unitId) };
+
+    if (paymentStatus) {
+      if (paymentStatus === 'PAID') {
+        filter.$expr = { $gte: ['$amountPaid', '$total'] };
+      } else if (paymentStatus === 'PARTIAL') {
+        filter.$expr = {
+          $and: [
+            { $gt: ['$amountPaid', 0] },
+            { $lt: ['$amountPaid', '$total'] }
+          ]
+        };
+      } else if (paymentStatus === 'UNPAID') {
+        filter.$expr = {
+          $and: [
+            { $lte: ['$amountPaid', 0] },
+            { $gt: ['$total', 0] }
+          ]
+        };
+      }
+      filter.type = TransactionType.SALE;
+    }
+
     return this.txModel
-      .find({ unitId: new Types.ObjectId(unitId) })
+      .find(filter)
       .sort({ timestamp: -1 })
       .skip((page - 1) * limit)
       .limit(limit)
@@ -190,10 +218,31 @@ export class TransactionsService {
       .exec();
   }
 
-  async findAll(unitId?: string, page = 1, limit = 50): Promise<TransactionDocument[]> {
+  async findAll(unitId?: string, page = 1, limit = 50, paymentStatus?: string): Promise<TransactionDocument[]> {
     const filter: any = {};
     if (unitId) {
       filter.unitId = new Types.ObjectId(unitId);
+    }
+
+    if (paymentStatus) {
+      if (paymentStatus === 'PAID') {
+        filter.$expr = { $gte: ['$amountPaid', '$total'] };
+      } else if (paymentStatus === 'PARTIAL') {
+        filter.$expr = {
+          $and: [
+            { $gt: ['$amountPaid', 0] },
+            { $lt: ['$amountPaid', '$total'] }
+          ]
+        };
+      } else if (paymentStatus === 'UNPAID') {
+        filter.$expr = {
+          $and: [
+            { $lte: ['$amountPaid', 0] },
+            { $gt: ['$total', 0] }
+          ]
+        };
+      }
+      filter.type = TransactionType.SALE;
     }
 
     return this.txModel
@@ -206,14 +255,75 @@ export class TransactionsService {
       .exec();
   }
 
+  async recordPayment(txId: string, amount: number, userId: string): Promise<TransactionDocument> {
+    const tx = await this.txModel.findById(txId);
+    if (!tx) throw new NotFoundException('Transaction not found');
+    if (tx.type !== TransactionType.SALE) throw new BadRequestException('Can only record payments for sales');
+
+    const balance = tx.total - tx.amountPaid;
+    if (balance <= 0) throw new BadRequestException('This transaction is already fully paid');
+
+    const paymentAmount = Math.min(amount, balance);
+    tx.amountPaid += paymentAmount;
+    
+    // Maintain audit trail
+    if (!tx.paymentLog) tx.paymentLog = [];
+    tx.paymentLog.push({
+      amount: paymentAmount,
+      recordedBy: new Types.ObjectId(userId),
+      timestamp: new Date()
+    });
+    
+    const savedTx = await tx.save();
+    
+    this.eventsGateway.broadcastAnalyticsUpdate(tx.unitId.toString());
+    return savedTx;
+  }
+
   async getGlobalSummary() {
     const result = await this.txModel.aggregate([
       {
         $group: {
           _id: null,
-          totalRevenue: { $sum: '$total' },
+          totalRevenue: { $sum: '$amountPaid' },
+          totalOutstanding: {
+            $sum: {
+              $cond: [
+                { $eq: ['$type', TransactionType.SALE] },
+                { $subtract: ['$total', '$amountPaid'] },
+                0
+              ]
+            }
+          },
           totalTransactions: {
             $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
+          },
+          paidCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ['$type', TransactionType.SALE] }, { $gte: ['$amountPaid', '$total'] }] },
+                1,
+                0
+              ]
+            }
+          },
+          partialCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ['$type', TransactionType.SALE] }, { $gt: ['$amountPaid', 0] }, { $lt: ['$amountPaid', '$total'] }] },
+                1,
+                0
+              ]
+            }
+          },
+          unpaidCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ['$type', TransactionType.SALE] }, { $lte: ['$amountPaid', 0] }, { $gt: ['$total', 0] }] },
+                1,
+                0
+              ]
+            }
           },
           totalUnits: { $addToSet: '$unitId' },
         },
@@ -221,12 +331,16 @@ export class TransactionsService {
       {
         $project: {
           totalRevenue: 1,
+          totalOutstanding: 1,
           totalTransactions: 1,
+          paidCount: 1,
+          partialCount: 1,
+          unpaidCount: 1,
           totalUnits: { $size: '$totalUnits' },
         },
       },
     ]);
-    return result[0] || { totalRevenue: 0, totalTransactions: 0, totalUnits: 0 };
+    return result[0] || { totalRevenue: 0, totalOutstanding: 0, totalTransactions: 0, paidCount: 0, partialCount: 0, unpaidCount: 0, totalUnits: 0 };
   }
 
   async getUnitSummary(unitId: string) {
@@ -243,14 +357,50 @@ export class TransactionsService {
       {
         $group: {
           _id: null,
-          todayRevenue: { $sum: '$total' },
+          todayRevenue: { $sum: '$amountPaid' },
+          todayOutstanding: {
+            $sum: {
+              $cond: [
+                { $eq: ['$type', TransactionType.SALE] },
+                { $subtract: ['$total', '$amountPaid'] },
+                0
+              ]
+            }
+          },
           todayTransactions: {
             $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
+          },
+          paidCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ['$type', TransactionType.SALE] }, { $gte: ['$amountPaid', '$total'] }] },
+                1,
+                0
+              ]
+            }
+          },
+          partialCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ['$type', TransactionType.SALE] }, { $gt: ['$amountPaid', 0] }, { $lt: ['$amountPaid', '$total'] }] },
+                1,
+                0
+              ]
+            }
+          },
+          unpaidCount: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ['$type', TransactionType.SALE] }, { $lte: ['$amountPaid', 0] }, { $gt: ['$total', 0] }] },
+                1,
+                0
+              ]
+            }
           },
         },
       },
     ]);
-    return result[0] || { todayRevenue: 0, todayTransactions: 0 };
+    return result[0] || { todayRevenue: 0, todayOutstanding: 0, todayTransactions: 0, paidCount: 0, partialCount: 0, unpaidCount: 0 };
   }
 
   async getUnitsPerformance() {
@@ -321,7 +471,7 @@ export class TransactionsService {
       {
         $group: {
           _id: { $dateToString: { format: groupFormat, date: '$timestamp' } },
-          revenue: { $sum: '$total' },
+          revenue: { $sum: '$amountPaid' },
           count: {
             $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
           },

@@ -23,9 +23,19 @@ export class TransactionItem {
   priceAtTime: number;
 }
 
+export class PaymentLogEntry {
+  @Prop({ required: true, type: Number })
+  amount: number;
+
+  @Prop({ required: true, type: Types.ObjectId, ref: 'User' })
+  recordedBy: Types.ObjectId;
+
+  @Prop({ default: Date.now })
+  timestamp: Date;
+}
+
 @Schema({
   timestamps: true,
-  // Enforce immutability at the schema level
   strict: true,
 })
 export class Transaction {
@@ -52,6 +62,9 @@ export class Transaction {
 
   @Prop({ required: true, type: Number, default: 0 })
   amountPaid: number;
+
+  @Prop({ type: [{ amount: Number, recordedBy: { type: Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }], default: [] })
+  paymentLog: PaymentLogEntry[];
 
   @Prop({ default: Date.now })
   timestamp: Date;
