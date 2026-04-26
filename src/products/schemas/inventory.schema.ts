@@ -10,9 +10,6 @@ export class Inventory {
 
   @Prop({ type: Types.ObjectId, ref: 'Unit', required: true })
   unitId: Types.ObjectId;
-
-  @Prop({ required: true, type: Number, default: 0 })
-  stock: number;
 }
 
 export const InventorySchema = SchemaFactory.createForClass(Inventory);

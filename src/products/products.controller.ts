@@ -67,11 +67,4 @@ export class ProductsController {
     return { success: true, message: 'Product deactivated' };
   }
 
-  @Patch('inventory/bulk')
-  @Roles(Role.SUPER_ADMIN, Role.UNIT_MANAGER)
-  bulkUpdateStock(@Request() req: any, @Body() body: { updates: { productId: string; stock: number }[] }) {
-    const unitId = req.user.unitId;
-    if (!unitId) throw new ForbiddenException('unitId is required for this operation');
-    return this.productsService.bulkUpdateInventory(unitId, body.updates);
-  }
 }

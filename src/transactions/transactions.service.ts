@@ -20,6 +20,7 @@ export class TransactionsService {
     items: { productId: string; qty: number; overridePrice?: number }[],
     customerName?: string,
     amountPaid?: number,
+    clientId?: string,
   ): Promise<TransactionDocument> {
     if (!items || items.length === 0) {
       throw new BadRequestException('A sale must have at least one item');
@@ -29,11 +30,6 @@ export class TransactionsService {
     const resolvedItems = await Promise.all(
       items.map(async (item) => {
         const product = await this.productsService.findOne(item.productId, unitId);
-        if (product.stock < item.qty) {
-          throw new BadRequestException(
-            `Insufficient stock for ${product.name}. Available: ${product.stock}, Requested: ${item.qty}`,
-          );
-        }
         return {
           productId: new Types.ObjectId(item.productId),
           productName: product.name,
@@ -57,6 +53,7 @@ export class TransactionsService {
         timestamp: new Date()
       }] : [],
       processedBy: new Types.ObjectId(userId),
+      clientId: clientId ? new Types.ObjectId(clientId) : undefined,
       customerName: customerName || 'Guest',
       timestamp: new Date(),
     });
@@ -67,12 +64,6 @@ export class TransactionsService {
       { path: 'processedBy', select: 'email' }
     ]);
 
-    // Update Unit-Specific Inventory
-    await Promise.all(
-      resolvedItems.map((item) =>
-        this.productsService.updateStock(unitId, item.productId.toString(), -item.qty),
-      ),
-    );
 
     this.eventsGateway.broadcastNewTransaction(unitId, savedTx);
     this.eventsGateway.broadcastAnalyticsUpdate(unitId);
@@ -117,12 +108,6 @@ export class TransactionsService {
       { path: 'processedBy', select: 'email' }
     ]);
 
-    // Restore Unit-Specific Inventory
-    await Promise.all(
-      original.items.map((item) =>
-        this.productsService.updateStock(unitId, item.productId.toString(), item.qty),
-      ),
-    );
 
     this.eventsGateway.broadcastNewTransaction(unitId, savedTx);
     this.eventsGateway.broadcastAnalyticsUpdate(unitId);
@@ -184,12 +169,41 @@ export class TransactionsService {
       { path: 'processedBy', select: 'email' }
     ]);
 
-    // Restore Unit-Specific Inventory for refunded quantities
-    await Promise.all(
-      resolvedItems.map((item) =>
-        this.productsService.updateStock(unitId, item.productId.toString(), item.qty),
-      ),
-    );
+
+    this.eventsGateway.broadcastNewTransaction(unitId, savedTx);
+    this.eventsGateway.broadcastAnalyticsUpdate(unitId);
+    return savedTx;
+  }
+
+  async createPayment(
+    unitId: string,
+    userId: string,
+    clientId: string,
+    amount: number,
+    customerName?: string,
+  ): Promise<TransactionDocument> {
+    const tx = new this.txModel({
+      unitId: new Types.ObjectId(unitId),
+      type: TransactionType.PAYMENT,
+      items: [],
+      total: 0,
+      amountPaid: amount,
+      paymentLog: [{
+        amount: amount,
+        recordedBy: new Types.ObjectId(userId),
+        timestamp: new Date()
+      }],
+      processedBy: new Types.ObjectId(userId),
+      clientId: new Types.ObjectId(clientId),
+      customerName: customerName || 'Client Payment',
+      timestamp: new Date(),
+    });
+
+    const savedTx = await tx.save();
+    await savedTx.populate([
+      { path: 'unitId', select: 'name location' },
+      { path: 'processedBy', select: 'email' }
+    ]);
 
     this.eventsGateway.broadcastNewTransaction(unitId, savedTx);
     this.eventsGateway.broadcastAnalyticsUpdate(unitId);
@@ -306,7 +320,7 @@ export class TransactionsService {
           totalOutstanding: {
             $sum: {
               $cond: [
-                { $eq: ['$type', TransactionType.SALE] },
+                { $in: ['$type', [TransactionType.SALE, TransactionType.PAYMENT]] },
                 { $subtract: ['$total', '$amountPaid'] },
                 0
               ]
@@ -378,7 +392,7 @@ export class TransactionsService {
           todayOutstanding: {
             $sum: {
               $cond: [
-                { $eq: ['$type', TransactionType.SALE] },
+                { $in: ['$type', [TransactionType.SALE, TransactionType.PAYMENT]] },
                 { $subtract: ['$total', '$amountPaid'] },
                 0
               ]

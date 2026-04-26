@@ -12,6 +12,7 @@ import { ProductsModule } from './products/products.module';
 import { TransactionsModule } from './transactions/transactions.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { EventsModule } from './events/events.module';
+import { ClientsModule } from './clients/clients.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { EventsModule } from './events/events.module';
     TransactionsModule,
     AnalyticsModule,
     EventsModule,
+    ClientsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -7,6 +7,7 @@ export enum TransactionType {
   SALE = 'SALE',
   VOID = 'VOID',
   REFUND = 'REFUND',
+  PAYMENT = 'PAYMENT',
 }
 
 export class TransactionItem {
@@ -56,6 +57,9 @@ export class Transaction {
 
   @Prop({ type: Types.ObjectId, ref: 'User', required: true })
   processedBy: Types.ObjectId;
+
+  @Prop({ type: Types.ObjectId, ref: 'Client', required: false })
+  clientId?: Types.ObjectId;
 
   @Prop({ type: String, default: 'Guest' })
   customerName: string;

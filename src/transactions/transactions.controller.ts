@@ -76,7 +76,7 @@ export class TransactionsController {
   @Roles(Role.UNIT_MANAGER)
   createSale(
     @Request() req: any,
-    @Body() body: { items: { productId: string; qty: number; overridePrice?: number }[]; customerName?: string; amountPaid?: number },
+    @Body() body: { items: { productId: string; qty: number; overridePrice?: number }[]; customerName?: string; amountPaid?: number; clientId?: string },
   ) {
     return this.transactionsService.createSale(
       req.user.unitId,
@@ -84,6 +84,7 @@ export class TransactionsController {
       body.items,
       body.customerName,
       body.amountPaid,
+      body.clientId,
     );
   }
 
@@ -111,5 +112,20 @@ export class TransactionsController {
     @Body() body: { amount: number },
   ) {
     return this.transactionsService.recordPayment(id, body.amount, req.user.userId);
+  }
+
+  @Post('payment')
+  @Roles(Role.UNIT_MANAGER)
+  recordClientPayment(
+    @Request() req: any,
+    @Body() body: { clientId: string; amount: number; customerName?: string },
+  ) {
+    return this.transactionsService.createPayment(
+      req.user.unitId,
+      req.user.userId,
+      body.clientId,
+      body.amount,
+      body.customerName,
+    );
   }
 }

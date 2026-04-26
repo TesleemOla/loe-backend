@@ -50,15 +50,5 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.server.to('admins').emit('analyticsUpdate');
   }
 
-  broadcastLowStockAlert(unitId: string, product: any) {
-    const payload = {
-      productId: product._id,
-      name: product.name,
-      sku: product.sku,
-      stock: product.stock,
-      timestamp: new Date(),
-    };
-    this.server.to(`unit_${unitId}`).emit('lowStockAlert', payload);
-    this.server.to('admins').emit('lowStockAlert', payload);
-  }
 }
+
