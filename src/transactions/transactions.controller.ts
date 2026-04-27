@@ -113,6 +113,16 @@ export class TransactionsController {
   ) {
     return this.transactionsService.recordPayment(id, body.amount, req.user.userId);
   }
+  
+  @Post(':id/link-client')
+  @Roles(Role.UNIT_MANAGER)
+  linkClient(
+    @Param('id') id: string,
+    @Request() req: any,
+    @Body() body: { clientId: string },
+  ) {
+    return this.transactionsService.linkClient(id, body.clientId, req.user.unitId);
+  }
 
   @Post('payment')
   @Roles(Role.UNIT_MANAGER)

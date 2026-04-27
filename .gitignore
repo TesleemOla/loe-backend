@@ -6,3 +6,6 @@ dist
 .pnp.js
 .pnp.cjs
 .pnp.loader.mjs
+
+/build-dist
+dist

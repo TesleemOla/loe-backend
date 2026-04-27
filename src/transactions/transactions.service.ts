@@ -4,6 +4,7 @@ import { Model, Types } from 'mongoose';
 import { Transaction, TransactionDocument, TransactionType } from './schemas/transaction.schema';
 import { ProductsService } from '../products/products.service';
 import { EventsGateway } from '../events/events.gateway';
+import { ClientsService } from '../clients/clients.service';
 
 @Injectable()
 export class TransactionsService {
@@ -11,6 +12,7 @@ export class TransactionsService {
     @InjectModel(Transaction.name) private txModel: Model<TransactionDocument>,
     private productsService: ProductsService,
     private eventsGateway: EventsGateway,
+    private clientsService: ClientsService,
   ) {}
 
   // ─── CREATE SALE ────────────────────────────────────────────────────────────
@@ -308,6 +310,43 @@ export class TransactionsService {
     ]);
     
     this.eventsGateway.broadcastAnalyticsUpdate(tx.unitId.toString());
+    return savedTx;
+  }
+
+  async linkClient(txId: string, clientId: string, unitId: string): Promise<TransactionDocument> {
+    const tx = await this.txModel.findById(txId);
+    if (!tx) throw new NotFoundException('Transaction not found');
+    
+    // Check if it belongs to the unit
+    if (tx.unitId.toString() !== unitId) {
+      throw new BadRequestException('Transaction does not belong to your unit');
+    }
+
+    if (tx.type !== TransactionType.SALE) {
+      throw new BadRequestException('Only sales can be linked to clients');
+    }
+
+    // Constraint: if already connected to a client in the list, do not accept
+    if (tx.clientId) {
+      throw new BadRequestException('This receipt is already connected to a client');
+    }
+
+    // Verify client exists
+    const client = await this.clientsService.findOne(clientId);
+    if (!client) throw new NotFoundException('Client not found');
+
+    // Update the transaction
+    tx.clientId = new Types.ObjectId(clientId);
+    tx.customerName = client.name; // Standardize name to client's name
+
+    const savedTx = await tx.save();
+    
+    await savedTx.populate([
+      { path: 'unitId', select: 'name location' },
+      { path: 'processedBy', select: 'email' }
+    ]);
+
+    this.eventsGateway.broadcastAnalyticsUpdate(unitId);
     return savedTx;
   }
 

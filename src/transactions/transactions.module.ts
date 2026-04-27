@@ -5,12 +5,14 @@ import { TransactionsController } from './transactions.controller';
 import { Transaction, TransactionSchema } from './schemas/transaction.schema';
 import { ProductsModule } from '../products/products.module';
 import { EventsModule } from '../events/events.module';
+import { ClientsModule } from '../clients/clients.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([{ name: Transaction.name, schema: TransactionSchema }]),
     ProductsModule, // Needs ProductsService to validate & snapshot product details
     EventsModule,
+    ClientsModule,
   ],
   providers: [TransactionsService],
   controllers: [TransactionsController],
