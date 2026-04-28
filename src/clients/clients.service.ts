@@ -107,7 +107,7 @@ export class ClientsService {
         type: tx.type,
         total: tx.total,
         paid: tx.amountPaid || 0,
-        balance: runningBalance,
+        balance: tx.total - (tx.amountPaid || 0),
         items: tx.items.map(item => `${item.qty}x ${item.productName}`).join(', ')
       };
     });
