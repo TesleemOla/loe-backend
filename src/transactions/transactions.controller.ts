@@ -1,5 +1,6 @@
 import { Controller, Get, Post, Body, Param, UseGuards, Request, Query } from '@nestjs/common';
 import { TransactionsService } from './transactions.service';
+import { PaymentMethod } from './schemas/transaction.schema';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -72,11 +73,17 @@ export class TransactionsController {
     return this.transactionsService.getUnitSummary(req.user.unitId);
   }
 
+  @Get('summary/daily-breakdown')
+  @Roles(Role.UNIT_MANAGER)
+  getDailyBreakdown(@Request() req: any) {
+    return this.transactionsService.getDailyPaymentsBreakdown(req.user.unitId);
+  }
+
   @Post('sale')
   @Roles(Role.UNIT_MANAGER)
   createSale(
     @Request() req: any,
-    @Body() body: { items: { productId: string; qty: number; overridePrice?: number }[]; customerName?: string; amountPaid?: number; clientId?: string },
+    @Body() body: { items: { productId: string; qty: number; overridePrice?: number }[]; customerName?: string; amountPaid?: number; clientId?: string; paymentMethod?: PaymentMethod },
   ) {
     return this.transactionsService.createSale(
       req.user.unitId,
@@ -85,6 +92,7 @@ export class TransactionsController {
       body.customerName,
       body.amountPaid,
       body.clientId,
+      body.paymentMethod,
     );
   }
 
@@ -109,9 +117,9 @@ export class TransactionsController {
   recordPayment(
     @Param('id') id: string,
     @Request() req: any,
-    @Body() body: { amount: number },
+    @Body() body: { amount: number; paymentMethod?: PaymentMethod },
   ) {
-    return this.transactionsService.recordPayment(id, body.amount, req.user.userId);
+    return this.transactionsService.recordPayment(id, body.amount, req.user.userId, body.paymentMethod);
   }
   
   @Post(':id/link-client')
@@ -128,7 +136,7 @@ export class TransactionsController {
   @Roles(Role.UNIT_MANAGER)
   recordClientPayment(
     @Request() req: any,
-    @Body() body: { clientId: string; amount: number; customerName?: string },
+    @Body() body: { clientId: string; amount: number; customerName?: string; paymentMethod?: PaymentMethod },
   ) {
     return this.transactionsService.createPayment(
       req.user.unitId,
@@ -136,6 +144,7 @@ export class TransactionsController {
       body.clientId,
       body.amount,
       body.customerName,
+      body.paymentMethod,
     );
   }
 }

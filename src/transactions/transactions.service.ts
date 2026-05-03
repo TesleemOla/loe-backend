@@ -1,7 +1,7 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
-import { Transaction, TransactionDocument, TransactionType } from './schemas/transaction.schema';
+import { Transaction, TransactionDocument, TransactionType, PaymentMethod } from './schemas/transaction.schema';
 import { ProductsService } from '../products/products.service';
 import { EventsGateway } from '../events/events.gateway';
 import { ClientsService } from '../clients/clients.service';
@@ -23,6 +23,7 @@ export class TransactionsService {
     customerName?: string,
     amountPaid?: number,
     clientId?: string,
+    paymentMethod: PaymentMethod = PaymentMethod.CASH,
   ): Promise<TransactionDocument> {
     if (!items || items.length === 0) {
       throw new BadRequestException('A sale must have at least one item');
@@ -49,8 +50,9 @@ export class TransactionsService {
       items: resolvedItems,
       total,
       amountPaid: amountPaid !== undefined ? amountPaid : total,
-      paymentLog: amountPaid !== 0 ? [{
+      paymentLog: amountPaid !== 0 && (amountPaid !== undefined ? amountPaid : total) > 0 ? [{
         amount: amountPaid !== undefined ? amountPaid : total,
+        method: paymentMethod,
         recordedBy: new Types.ObjectId(userId),
         timestamp: new Date()
       }] : [],
@@ -183,6 +185,7 @@ export class TransactionsService {
     clientId: string,
     amount: number,
     customerName?: string,
+    paymentMethod: PaymentMethod = PaymentMethod.CASH,
   ): Promise<TransactionDocument> {
     const tx = new this.txModel({
       unitId: new Types.ObjectId(unitId),
@@ -192,6 +195,7 @@ export class TransactionsService {
       amountPaid: amount,
       paymentLog: [{
         amount: amount,
+        method: paymentMethod,
         recordedBy: new Types.ObjectId(userId),
         timestamp: new Date()
       }],
@@ -284,7 +288,7 @@ export class TransactionsService {
       .exec();
   }
 
-  async recordPayment(txId: string, amount: number, userId: string): Promise<TransactionDocument> {
+  async recordPayment(txId: string, amount: number, userId: string, paymentMethod: PaymentMethod = PaymentMethod.CASH): Promise<TransactionDocument> {
     const tx = await this.txModel.findById(txId);
     if (!tx) throw new NotFoundException('Transaction not found');
     if (tx.type !== TransactionType.SALE) throw new BadRequestException('Can only record payments for sales');
@@ -299,6 +303,7 @@ export class TransactionsService {
     if (!tx.paymentLog) tx.paymentLog = [];
     tx.paymentLog.push({
       amount: paymentAmount,
+      method: paymentMethod,
       recordedBy: new Types.ObjectId(userId),
       timestamp: new Date()
     });
@@ -471,6 +476,48 @@ export class TransactionsService {
       },
     ]);
     return result[0] || { todayRevenue: 0, todayOutstanding: 0, todayTransactions: 0, paidCount: 0, partialCount: 0, unpaidCount: 0 };
+  }
+
+  async getDailyPaymentsBreakdown(unitId: string) {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+
+    const result = await this.txModel.aggregate([
+      {
+        $match: {
+          unitId: new Types.ObjectId(unitId),
+          'paymentLog.timestamp': { $gte: start }
+        }
+      },
+      { $unwind: '$paymentLog' },
+      {
+        $match: {
+          'paymentLog.timestamp': { $gte: start }
+        }
+      },
+      {
+        $group: {
+          _id: '$paymentLog.method',
+          totalAmount: { $sum: '$paymentLog.amount' }
+        }
+      }
+    ]);
+
+    const breakdown = {
+      CASH: 0,
+      TRANSFER: 0,
+      POS: 0,
+      TOTAL: 0
+    };
+
+    result.forEach(item => {
+      if (item._id) {
+        breakdown[item._id as keyof typeof breakdown] = item.totalAmount;
+        breakdown.TOTAL += item.totalAmount;
+      }
+    });
+
+    return breakdown;
   }
 
   async getUnitsPerformance() {

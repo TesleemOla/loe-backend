@@ -10,6 +10,12 @@ export enum TransactionType {
   PAYMENT = 'PAYMENT',
 }
 
+export enum PaymentMethod {
+  CASH = 'CASH',
+  TRANSFER = 'TRANSFER',
+  POS = 'POS',
+}
+
 export class TransactionItem {
   @Prop({ type: Types.ObjectId, ref: 'Product', required: true })
   productId: Types.ObjectId;
@@ -27,6 +33,9 @@ export class TransactionItem {
 export class PaymentLogEntry {
   @Prop({ required: true, type: Number })
   amount: number;
+
+  @Prop({ required: true, enum: PaymentMethod })
+  method: PaymentMethod;
 
   @Prop({ required: true, type: Types.ObjectId, ref: 'User' })
   recordedBy: Types.ObjectId;
@@ -67,7 +76,7 @@ export class Transaction {
   @Prop({ required: true, type: Number, default: 0 })
   amountPaid: number;
 
-  @Prop({ type: [{ amount: Number, recordedBy: { type: Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }], default: [] })
+  @Prop({ type: [{ amount: Number, method: { type: String, enum: PaymentMethod }, recordedBy: { type: Types.ObjectId, ref: 'User' }, timestamp: { type: Date, default: Date.now } }], default: [] })
   paymentLog: PaymentLogEntry[];
 
   @Prop({ default: Date.now })
