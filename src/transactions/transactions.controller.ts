@@ -40,8 +40,8 @@ export class TransactionsController {
 
   @Get('summary/global')
   @Roles(Role.SUPER_ADMIN)
-  getGlobalSummary() {
-    return this.transactionsService.getGlobalSummary();
+  getGlobalSummary(@Query('period') period?: string) {
+    return this.transactionsService.getGlobalSummary(period);
   }
 
   @Get('performance/units')
@@ -69,8 +69,8 @@ export class TransactionsController {
 
   @Get('summary/local')
   @Roles(Role.UNIT_MANAGER)
-  getLocalSummary(@Request() req: any) {
-    return this.transactionsService.getUnitSummary(req.user.unitId);
+  getLocalSummary(@Request() req: any, @Query('period') period?: string) {
+    return this.transactionsService.getUnitSummary(req.user.unitId, period);
   }
 
   @Get('summary/daily-breakdown')

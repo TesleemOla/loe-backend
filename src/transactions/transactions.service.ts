@@ -355,8 +355,15 @@ export class TransactionsService {
     return savedTx;
   }
 
-  async getGlobalSummary() {
+  async getGlobalSummary(period?: string) {
+    const matchQuery: any = {};
+    if (period) {
+      const { startDate } = this.getPeriodConfig(period);
+      matchQuery.timestamp = { $gte: startDate };
+    }
+
     const result = await this.txModel.aggregate([
+      ...(period ? [{ $match: matchQuery }] : []),
       {
         $group: {
           _id: null,
@@ -418,22 +425,21 @@ export class TransactionsService {
     return result[0] || { totalRevenue: 0, totalOutstanding: 0, totalTransactions: 0, paidCount: 0, partialCount: 0, unpaidCount: 0, totalUnits: 0 };
   }
 
-  async getUnitSummary(unitId: string) {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
+  async getUnitSummary(unitId: string, period?: string) {
+    const { startDate } = this.getPeriodConfig(period || 'day');
 
     const result = await this.txModel.aggregate([
       {
         $match: {
           unitId: new Types.ObjectId(unitId),
-          timestamp: { $gte: start },
+          timestamp: { $gte: startDate },
         },
       },
       {
         $group: {
           _id: null,
-          todayRevenue: { $sum: '$amountPaid' },
-          todayOutstanding: {
+          totalRevenue: { $sum: '$amountPaid' },
+          totalOutstanding: {
             $sum: {
               $cond: [
                 { $in: ['$type', [TransactionType.SALE, TransactionType.PAYMENT]] },
@@ -442,7 +448,7 @@ export class TransactionsService {
               ]
             }
           },
-          todayTransactions: {
+          totalTransactions: {
             $sum: { $cond: [{ $eq: ['$type', TransactionType.SALE] }, 1, 0] },
           },
           paidCount: {
@@ -475,7 +481,7 @@ export class TransactionsService {
         },
       },
     ]);
-    return result[0] || { todayRevenue: 0, todayOutstanding: 0, todayTransactions: 0, paidCount: 0, partialCount: 0, unpaidCount: 0 };
+    return result[0] || { totalRevenue: 0, totalOutstanding: 0, totalTransactions: 0, paidCount: 0, partialCount: 0, unpaidCount: 0 };
   }
 
   async getDailyPaymentsBreakdown(unitId: string) {
@@ -552,28 +558,26 @@ export class TransactionsService {
     ]);
   }
 
-  async getAnalytics(unitId: string | null, period: 'week' | 'month' | 'year') {
+  private getPeriodConfig(period: string) {
     const now = new Date();
-    let startDate: Date;
-    let groupFormat: string;
-
     switch (period) {
+      case 'day':
+        const start = new Date();
+        start.setHours(0, 0, 0, 0);
+        return { startDate: start, groupFormat: '%H:%M' };
       case 'week':
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        groupFormat = '%Y-%m-%d';
-        break;
+        return { startDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), groupFormat: '%Y-%m-%d' };
       case 'month':
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
-        groupFormat = '%Y-%m-%d';
-        break;
+        return { startDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000), groupFormat: '%Y-%m-%d' };
       case 'year':
-        startDate = new Date(now.getFullYear(), now.getMonth() - 11, 1);
-        groupFormat = '%Y-%m';
-        break;
+        return { startDate: new Date(now.getFullYear(), now.getMonth() - 11, 1), groupFormat: '%Y-%m' };
       default:
-        startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-        groupFormat = '%Y-%m-%d';
+        return { startDate: new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000), groupFormat: '%Y-%m-%d' };
     }
+  }
+
+  async getAnalytics(unitId: string | null, period: 'day' | 'week' | 'month' | 'year' | string) {
+    const { startDate, groupFormat } = this.getPeriodConfig(period);
 
     const matchQuery: any = {
       timestamp: { $gte: startDate },
